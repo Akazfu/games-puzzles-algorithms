@@ -1,11 +1,11 @@
 """
-negamax small-board hex solver
+vc-mustplay small-board hex solver
 
-based on ttt and 3x3 go programs,
-special move order for 3x3, 3x4, 4x4 only,
-too slow for larger boards
+ok up to 4x4 boards
+TODO: add captured cell reasoning
+TODO: use H-search to find vcs
 
-4x4 empty board, x-to-move, x wins, 7034997 calls
+based on hex-simple.py
 """
 
 import numpy as np
@@ -28,9 +28,9 @@ def oppCH(ch):
 """
 board: one-dimensional string
 
-index positions for     board:    0 1 2       <- row 2
+index positions for     board:    0 1 2       <- row 0
                                    3 4 5       <- row 1
-                                    0 1 2       <- row 0
+                                    6 7 8       <- row 2
 """
 
 def coord_to_point(r, c, C): 
@@ -42,6 +42,12 @@ def point_to_coord(p, C):
 def point_to_alphanum(p, C):
   r, c = point_to_coord(p, C)
   return 'abcdefghj'[c] + '1234566789'[r]
+
+def pointset_to_str(S):
+  s = ''
+  for j in range(N):
+    s += BCH if j in S else ECH
+  return s
 
 def change_str(s, where, what):
   return s[:where] + what + s[where+1:]
@@ -102,15 +108,18 @@ for r in range(ROWS):
 for c in range(COLS):
   TOP_ROW.add(coord_to_point(0, c, COLS))
   BTM_ROW.add(coord_to_point(ROWS-1, c, COLS))
-#print(LFT_COL, RGT_COL, TOP_ROW, BTM_ROW)
+print(LFT_COL, RGT_COL, TOP_ROW, BTM_ROW)
 
 """
 cell order determines move order
 """
 
-if ROWS == 3 and COLS == 3: CELLS = (4,2,6,3,5,1,7,0,8)
+if ROWS == 2 and COLS == 2: CELLS = (1,2,0,3)
+elif ROWS == 3 and COLS == 3: CELLS = (4,2,6,3,5,1,7,0,8)
 elif ROWS == 3 and COLS == 4: CELLS = (5,6,4,7,2,9,3,8,1,10,0,11)
 elif ROWS == 4 and COLS == 4: CELLS = (6,9,3,12,2,13,5,10,8,7,1,14,4,11,0,15)
+elif ROWS == 5 and COLS == 5: 
+    CELLS = (12,8,16,7,17,6,18,11,13,4,20,3,21,2,22,15,9,10,14,5,19,1,23,0,24)
 else: CELLS = [j for j in range(N)]  # this order terrible for solving
 
 """
@@ -164,11 +173,12 @@ def msg(s, ch):
   if has_win(s, 'x'): return('x has won')
   elif has_win(s, 'o'): return('o has won')
   else: 
-    wm, calls = win_move(s, ch)
+    wm, calls, vc = win_move(s, ch)
     out = '\n' + ch + '-to-move: '
     out += (ch if wm else oppCH(ch)) + ' wins' 
     out += (' ... ' if wm else ' ') + wm + '\n'
-    out += str(calls) + ' calls\n'
+    out += str(calls) + ' calls   '
+    out += pointset_to_str(vc)
     return out
 
 """
@@ -192,23 +202,41 @@ def has_win(brd, who):
         Q.append(d)
         seen.add(d)
   return False
-        
+
 def win_move(s, ptm): # assume neither player has won yet
-  blanks, calls = [], 1
-  for j in CELLS:
-    if s[j]==ECH: blanks.append(j)
-  #if len(blanks)==0: print('whoops',s)
-  #assert(len(blanks)>0) # since x has no draws
+  """
+  s        board, as string
+  ptm      player to move, as character
+  return   winning move if ptm has winning move, else ''
+           count   total number of calls 
+           win_set virtual connection for winner
+             if ptm:  win_move U win_set is ptm winning s-c
+             if op't:            win_set is opt winning v-c
+  """
+  #print('win_move', s, ' ', ptm)
   optm = oppCH(ptm)
-  for k in blanks:
-    t = change_str(s, k, ptm)
+
+  calls, win_set = 1, set()
+  mustplay, opt_win_threats = set(), []
+  for j in CELLS:
+    if s[j]==ECH: mustplay.add(j)
+  #print('mustplay ', mustplay)
+
+  while len(mustplay) > 0:
+    for move in CELLS:
+      if move in mustplay: break
+    t = change_str(s, move, ptm) # resulting board
     if has_win(t, ptm):
-      return point_to_alphanum(k, COLS), calls
-    cw, prev_calls = win_move(t, optm)
-    calls += prev_calls
-    if not cw:
-      return point_to_alphanum(k, COLS), calls
-  return '', calls
+      return point_to_alphanum(move, COLS), calls, {move}
+    omv, ocalls, oset = win_move(t, optm)
+    calls += ocalls
+    if not omv: # opponent has no winning response to ptm move
+      oset.add(move)
+      return point_to_alphanum(move, COLS), calls, oset
+    mustplay = mustplay.intersection(oset)
+    opt_win_threats.append(oset)
+  ovc = set.union(*opt_win_threats)
+  return '', calls, ovc
 
 def interact():
   p = Position(ROWS, COLS)
